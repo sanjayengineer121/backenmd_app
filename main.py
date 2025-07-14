@@ -10,7 +10,8 @@ import uuid
 from fastapi.middleware.cors import CORSMiddleware
 import bcrypt
 from typing import Union
-
+from datetime import datetime, timedelta
+import uuid
 
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -29,6 +30,20 @@ app.add_middleware(
 DATA_FILE = "data.json"
 
 ACCOUNTS_FILE = "accounts.json"
+
+SESSION_FILE = "sessions.json"
+
+# Load/Save session functions
+def load_sessions():
+    if not os.path.exists(SESSION_FILE):
+        with open(SESSION_FILE, "w") as f:
+            json.dump({"sessions": []}, f)
+    with open(SESSION_FILE, "r") as f:
+        return json.load(f)
+
+def save_sessions(data):
+    with open(SESSION_FILE, "w") as f:
+        json.dump(data, f, indent=2)
 
 # Create the JSON file if it doesn't exist
 if not os.path.exists(ACCOUNTS_FILE):
@@ -49,6 +64,8 @@ def save_accounts(data):
         json.dump(data,f,indent=2)
 
 
+users_data = {"users": []}
+sessions_data = {"sessions": []}
 
 class VideoEntry(BaseModel):
     title: str
@@ -226,44 +243,40 @@ def get_sundari_entries(
 
 @app.post("/api/create-account")
 def create_account(user: UserCreate):
-    data = load_json(ACCOUNTS_FILE)
-    if any(u["username"] == user.username for u in data["users"]):
-        return {"status": "error", "detail": "Username already exists"}
+    if any(u["username"] == user.username for u in users_data["users"]):
+        return {"status": "error", "detail": "Username exists"}
     hashed = bcrypt.hashpw(user.password.encode(), bcrypt.gensalt()).decode()
-    data["users"].append({"username": user.username, "password": hashed})
-    save_json(ACCOUNTS_FILE, data)
+    users_data["users"].append({"username": user.username, "password": hashed})
     return {"status": "success", "username": user.username}
 
 
-from datetime import datetime, timedelta
-import uuid
 
-SESSION_FILE = "sessions.json"
-
-# Load/Save session functions
-def load_sessions():
-    if not os.path.exists(SESSION_FILE):
-        with open(SESSION_FILE, "w") as f:
-            json.dump({"sessions": []}, f)
-    with open(SESSION_FILE, "r") as f:
-        return json.load(f)
-
-def save_sessions(data):
-    with open(SESSION_FILE, "w") as f:
-        json.dump(data, f, indent=2)
 
 @app.post("/api/login")
 def login(user: UserCreate):
+    # Ensure accounts file exists
+    if not os.path.exists(ACCOUNTS_FILE):
+        with open(ACCOUNTS_FILE, "w") as f:
+            json.dump({"users": []}, f)
+
     accounts = load_accounts()
+
+    # Check if user exists
     for account in accounts["users"]:
         if account["username"] == user.username:
+            # Verify password
             if bcrypt.checkpw(user.password.encode("utf-8"), account["password"].encode("utf-8")):
-                # Generate session
+                
+                # Ensure session file exists
+                if not os.path.exists(SESSION_FILE):
+                    with open(SESSION_FILE, "w") as f:
+                        json.dump({"sessions": []}, f)
+                
+                # Load and update sessions
+                sessions = load_sessions()
                 session_id = str(uuid.uuid4())
                 expiry_time = (datetime.utcnow() + timedelta(hours=2)).isoformat()
 
-                # Store session
-                sessions = load_sessions()
                 sessions["sessions"].append({
                     "username": user.username,
                     "session_id": session_id,
@@ -277,11 +290,11 @@ def login(user: UserCreate):
                     "session_id": session_id,
                     "expires_at": expiry_time
                 }
-
             else:
                 raise HTTPException(status_code=401, detail="Incorrect password")
 
     raise HTTPException(status_code=404, detail="User not found")
+
 
 @app.get("/api/check-session")
 def check_session(session_id: str):
