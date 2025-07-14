@@ -1,7 +1,11 @@
-from fastapi import FastAPI, Request, Form, status, HTTPException,File, UploadFile,Query, HTTPException
-from fastapi.responses import HTMLResponse, RedirectResponse,FileResponse
-from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
+from fastapi import FastAPI, Request, Form, status, HTTPException,File, UploadFile,Query, HTTPException,Depends
+from sqlalchemy import Column, Integer, String, DateTime, create_engine
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, Session
+from pydantic import BaseModel
+from datetime import datetime, timedelta
+import bcrypt
+import uuid
 import json
 from pydantic import BaseModel, EmailStr
 from typing import List, Optional, Dict
@@ -10,14 +14,17 @@ import uuid
 from fastapi.middleware.cors import CORSMiddleware
 import bcrypt
 from typing import Union
-from datetime import datetime, timedelta
-import uuid
-
+import sqlite3
 app = FastAPI()
-app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# Set up templates folder
-templates = Jinja2Templates(directory="templates")
+DATA_FILE = "data.json"
+
+DATABASE_URL = "sqlite:///./main.db"
+
+engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+Base = declarative_base()
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -27,45 +34,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-DATA_FILE = "data.json"
 
-ACCOUNTS_FILE = "accounts.json"
+# Database Models
+class User(Base):
+    __tablename__ = "users"
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String, unique=True, index=True)
+    password = Column(String)
 
-SESSION_FILE = "sessions.json"
-
-# Load/Save session functions
-def load_sessions():
-    if not os.path.exists(SESSION_FILE):
-        with open(SESSION_FILE, "w") as f:
-            json.dump({"sessions": []}, f)
-    with open(SESSION_FILE, "r") as f:
-        return json.load(f)
-
-def save_sessions(data):
-    with open(SESSION_FILE, "w") as f:
-        json.dump(data, f, indent=2)
-
-# Create the JSON file if it doesn't exist
-if not os.path.exists(ACCOUNTS_FILE):
-    with open(ACCOUNTS_FILE, "w") as f:
-        json.dump({"users": []}, f)
-
-class UserCreate(BaseModel):
-    username:str
-    password:str
-
-def load_accounts():
-    with open(ACCOUNTS_FILE,'r') as f:
-        return json.load(f)
+class SessionToken(Base):
+    __tablename__ = "sessions"
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String)
+    session_id = Column(String, unique=True, index=True)
+    expires_at = Column(DateTime)
 
 
-def save_accounts(data):
-    with open(ACCOUNTS_FILE,'w') as f:
-        json.dump(data,f,indent=2)
+Base.metadata.create_all(bind=engine)
 
-
-users_data = {"users": []}
-sessions_data = {"sessions": []}
 
 class VideoEntry(BaseModel):
     title: str
@@ -80,9 +66,7 @@ class UploadData(BaseModel):
     session_id: str
     videos: List[VideoEntry]
 
-# -------------------
-# File helpers
-# -------------------
+
 def load_data():
     if not os.path.exists(DATA_FILE):
         return {"data": {"data": []}}
@@ -100,105 +84,60 @@ def save_data(data):
 def load_json(file): return json.load(open(file))
 def save_json(file, data): json.dump(data, open(file, "w"), indent=2)
 
-# ROUTES
-@app.get("/", response_class=HTMLResponse)
-def show_create_account(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+# Dependency
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 
-@app.get("/login", response_class=HTMLResponse)
-def show_login(request: Request):
-    return templates.TemplateResponse("login.html", {"request": request})
+class UserCreate(BaseModel):
+    username: str
+    password: str
 
 
-@app.get("/home", response_class=HTMLResponse)
-def serve_home(request: Request):
-    return templates.TemplateResponse("home.html", {"request": request})
-
-# -------------------
-# POST API to add profile
-# -------------------
-
-SESSION_FILE = "sessions.json"
-
-def load_sessions():
-    with open(SESSION_FILE, "r") as f:
-        return json.load(f)
-
-def is_session_valid(session_id: str):
-    sessions = load_sessions()
-    for session in sessions["sessions"]:
-        if session["session_id"] == session_id:
-            return datetime.utcnow() < datetime.fromisoformat(session["expires_at"])
-    return False
-
-@app.get("/api/session-info")
-def session_info(session_id: str):
-    sessions = load_json("sessions.json")
-    for session in sessions["sessions"]:
-        if session["session_id"] == session_id:
-            if datetime.utcnow() < datetime.fromisoformat(session["expires_at"]):
-                return {"status": "success", "username": session["username"]}
-            break
-    return {"status": "error", "detail": "Session invalid or expired"}
+@app.post("/api/create-account")
+def create_account(user: UserCreate, db: Session = Depends(get_db)):
+    existing = db.query(User).filter(User.username == user.username).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Username already exists")
+    hashed = bcrypt.hashpw(user.password.encode(), bcrypt.gensalt()).decode()
+    new_user = User(username=user.username, password=hashed)
+    db.add(new_user)
+    db.commit()
+    return {"status": "success", "username": user.username}
 
 
-@app.post("/api/add/sundarikanya", status_code=201)
-def add_sundari_entry(data: UploadData):
-    # ✅ Validate session
-    if not is_session_valid(data.session_id):
-        raise HTTPException(status_code=401, detail="Invalid or expired session")
+@app.post("/api/login")
+def login(user: UserCreate, db: Session = Depends(get_db)):
+    account = db.query(User).filter(User.username == user.username).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="User not found")
 
-    store = load_data()
-    existing = store.get("data", {}).get("data", [])
+    if not bcrypt.checkpw(user.password.encode(), account.password.encode()):
+        raise HTTPException(status_code=401, detail="Incorrect password")
 
-    added_count = 0
+    session_id = str(uuid.uuid4())
+    expires_at = datetime.utcnow() + timedelta(hours=2)
 
-    for video in data.videos:
-        # ✅ Create one entry with multiple video URLs
-        new_id = f"{len(existing) + 1:03d}"
-        new_entry = {
-            "id": new_id,
-            "uploader": data.uploader,
-            "title": video.title,
-            "description": video.description,
-            "thumbnail": video.thumbnail,
-            "videourl": video.videourl,  # ✅ entire list
-            "tag": video.tag,
-            "category": video.category
-        }
-        existing.append(new_entry)
-        added_count += 1
+    session_token = SessionToken(username=user.username, session_id=session_id, expires_at=expires_at)
+    db.add(session_token)
+    db.commit()
 
-    store["data"]["data"] = existing
-    save_data(store)
-
-    return {"status": "success", "added": added_count}
+    return {"status": "success", "session_id": session_id, "expires_at": expires_at.isoformat()}
 
 
+@app.get("/api/check-session")
+def check_session(session_id: str, db: Session = Depends(get_db)):
+    session = db.query(SessionToken).filter(SessionToken.session_id == session_id).first()
+    if not session:
+        return {"status": "invalid"}
+    if session.expires_at < datetime.utcnow():
+        return {"status": "expired"}
+    return {"status": "valid", "username": session.username}
 
-
-
-@app.get("/api/get/sundarikanya")
-def get_video_by_id(id: Optional[str] = Query(None)):
-    data = load_data()["data"]["data"]
-
-    # If no id is passed, return all videos
-    if id is None:
-        return data
-
-    # Format ID to 3 digits (e.g., "2" → "002")
-    formatted_id = id.zfill(3)
-
-    # Find the video with matching ID
-    result = next((item for item in data if item["id"] == formatted_id), None)
-
-    if not result:
-        raise HTTPException(status_code=404, detail=f"Video with ID {formatted_id} not found.")
-
-    return result
-
-# Utility: Convert ["Pakistani,Teen,,Model"] → ["Pakistani", "Teen", "Model"]
 def clean_split_list(value):
     if isinstance(value, list):
         cleaned = []
@@ -206,6 +145,20 @@ def clean_split_list(value):
             cleaned.extend([x.strip() for x in v.split(",") if x.strip()])
         return cleaned
     return []
+
+def is_session_valid(session_id: str):
+    conn = sqlite3.connect('main.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT expires_at FROM sessions WHERE session_id = ?", (session_id,))
+    row = cursor.fetchone()
+    conn.close()
+
+    if row:
+        expires_at = datetime.fromisoformat(row[0])
+        if datetime.utcnow() < expires_at:
+            return True
+    return False
+
 
 @app.get("/api/get/sundarikanya1")
 def get_sundari_entries(
@@ -240,69 +193,54 @@ def get_sundari_entries(
         "data": filtered_entries
     }
 
+@app.post("/api/add/sundarikanya", status_code=201)
+def add_sundari_entry(data: UploadData):
+    # ✅ Validate session
+    if not is_session_valid(data.session_id):
+        raise HTTPException(status_code=401, detail="Invalid or expired session")
 
-@app.post("/api/create-account")
-def create_account(user: UserCreate):
-    if any(u["username"] == user.username for u in users_data["users"]):
-        return {"status": "error", "detail": "Username exists"}
-    hashed = bcrypt.hashpw(user.password.encode(), bcrypt.gensalt()).decode()
-    users_data["users"].append({"username": user.username, "password": hashed})
-    return {"status": "success", "username": user.username}
+    store = load_data()
+    existing = store.get("data", {}).get("data", [])
 
+    added_count = 0
 
+    for video in data.videos:
+        # ✅ Create one entry with multiple video URLs
+        new_id = f"{len(existing) + 1:03d}"
+        new_entry = {
+            "id": new_id,
+            "uploader": data.uploader,
+            "title": video.title,
+            "description": video.description,
+            "thumbnail": video.thumbnail,
+            "videourl": video.videourl,  # ✅ entire list
+            "tag": video.tag,
+            "category": video.category
+        }
+        existing.append(new_entry)
+        added_count += 1
 
+    store["data"]["data"] = existing
+    save_data(store)
 
-@app.post("/api/login")
-def login(user: UserCreate):
-    # Ensure accounts file exists
-    if not os.path.exists(ACCOUNTS_FILE):
-        with open(ACCOUNTS_FILE, "w") as f:
-            json.dump({"users": []}, f)
-
-    accounts = load_accounts()
-
-    # Check if user exists
-    for account in accounts["users"]:
-        if account["username"] == user.username:
-            # Verify password
-            if bcrypt.checkpw(user.password.encode("utf-8"), account["password"].encode("utf-8")):
-                
-                # Ensure session file exists
-                if not os.path.exists(SESSION_FILE):
-                    with open(SESSION_FILE, "w") as f:
-                        json.dump({"sessions": []}, f)
-                
-                # Load and update sessions
-                sessions = load_sessions()
-                session_id = str(uuid.uuid4())
-                expiry_time = (datetime.utcnow() + timedelta(hours=2)).isoformat()
-
-                sessions["sessions"].append({
-                    "username": user.username,
-                    "session_id": session_id,
-                    "expires_at": expiry_time
-                })
-                save_sessions(sessions)
-
-                return {
-                    "status": "success",
-                    "message": "Login successful",
-                    "session_id": session_id,
-                    "expires_at": expiry_time
-                }
-            else:
-                raise HTTPException(status_code=401, detail="Incorrect password")
-
-    raise HTTPException(status_code=404, detail="User not found")
+    return {"status": "success", "added": added_count}
 
 
-@app.get("/api/check-session")
-def check_session(session_id: str):
-    sessions = load_sessions()
-    for session in sessions["sessions"]:
-        if session["session_id"] == session_id:
-            if datetime.utcnow() < datetime.fromisoformat(session["expires_at"]):
-                return {"status": "valid", "username": session["username"]}
-            else:
-                return {"status": "expired"}
-    return {"status": "invalid"}
+@app.get("/api/get/sundarikanya")
+def get_video_by_id(id: Optional[str] = Query(None)):
+    data = load_data()["data"]["data"]
+
+    # If no id is passed, return all videos
+    if id is None:
+        return data
+
+    # Format ID to 3 digits (e.g., "2" → "002")
+    formatted_id = id.zfill(3)
+
+    # Find the video with matching ID
+    result = next((item for item in data if item["id"] == formatted_id), None)
+
+    if not result:
+        raise HTTPException(status_code=404, detail=f"Video with ID {formatted_id} not found.")
+
+    return result
