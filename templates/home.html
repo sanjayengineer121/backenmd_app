@@ -76,7 +76,7 @@
       window.location.href = "/login";
     });
   } else {
-    fetch(`/api/session-info?session_id=${encodeURIComponent(sessionId)}`)
+    fetch(`https://sundarikanya.vercel.app/api/session-info?session_id=${encodeURIComponent(sessionId)}`)
       .then(res => res.json())
       .then(data => {
         if (data.status === "success") {
@@ -145,7 +145,7 @@
       videos: [videoObject]  // Only one video object at a time
     };
 
-    fetch("/api/add/sundarikanya", {
+    fetch("https://sundarikanya.vercel.app/api/add/sundarikanya", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)

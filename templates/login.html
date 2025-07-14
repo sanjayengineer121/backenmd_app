@@ -43,7 +43,7 @@
         return;
       }
 
-      fetch("/api/login", {
+      fetch("https://sundarikanya.vercel.app/api/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, password })
