@@ -223,6 +223,61 @@ def get_sundari_entries(
     }
 
 
+@app.get("/api/get/search")
+def search_sundari_entries(
+    query: str = Query(..., description="Search by keyword in title, description, tag, or category")
+):
+    data_store = load_data()
+    all_entries = data_store.get("data", {}).get("data", [])
+
+    query_lower = query.lower()
+    results = []
+
+    for entry in all_entries:
+        title_match = query_lower in entry.get("title", "").lower()
+        description_match = query_lower in entry.get("description", "").lower()
+
+        tag_match = any(query_lower in tag.lower() for tag in entry.get("tag", []))
+        category_match = any(query_lower in cat.lower() for cat in entry.get("category", []))
+
+        if title_match or description_match or tag_match or category_match:
+            results.append(entry)
+
+    return {
+        "status": "success",
+        "query": query,
+        "count": len(results),
+        "data": results
+    }
+
+
+@app.get("/api/get/bestcategory")
+def get_best_category():
+    data_store = load_data()
+    all_entries = data_store.get("data", {}).get("data", [])
+
+    category_counter = {}
+
+    for entry in all_entries:
+        categories = entry.get("category", [])
+        for cat in categories:
+            cat_clean = cat.strip().lower()
+            if cat_clean:
+                category_counter[cat_clean] = category_counter.get(cat_clean, 0) + 1
+
+    # Sort categories by count descending
+    sorted_categories = sorted(category_counter.items(), key=lambda x: x[1], reverse=True)
+
+    best_categories = [{"category": cat, "count": count} for cat, count in sorted_categories]
+
+    return {
+        "status": "success",
+        "total_categories": len(best_categories),
+        "best_categories": best_categories
+    }
+
+
+
 @app.post("/api/create-account")
 def create_account(user: UserCreate):
     data = load_json(ACCOUNTS_FILE)
