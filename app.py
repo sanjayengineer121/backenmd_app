@@ -278,7 +278,9 @@ def clean_split_list(value):
 @app.get("/api/get/sundarikanya1")
 def get_sundari_entries(
     category: Optional[str] = None,
-    tag: Optional[str] = None
+    tag: Optional[str] = None,
+    page: int = 1,
+    limit: int = 36
 ):
     store = load_data()  # Load your JSON DB or file
     all_entries = store.get("data", {}).get("data", [])
@@ -301,39 +303,58 @@ def get_sundari_entries(
         if match_category and match_tag:
             filtered_entries.append(entry)
 
+    total = len(filtered_entries)
+
+    # Pagination logic
+    start = (page - 1) * limit
+    end = start + limit
+    paginated_data = filtered_entries[start:end]
+
     return {
         "status": "success",
         "filter": {"category": category, "tag": tag},
-        "count": len(filtered_entries),
-        "data": filtered_entries
+        "page": page,
+        "limit": limit,
+        "total": total,
+        "data": paginated_data
     }
+
 
 
 @app.get("/api/get/search")
 def search_sundari_entries(
-    query: str = Query(..., description="Search by keyword in title, description, tag, or category")
+    query: str = Query(..., description="Search by keyword in title, description, tag, or category"),
+    page: int = Query(1, ge=1, description="Page number"),
+    limit: int = Query(36, ge=1, le=100, description="Number of items per page"),
 ):
     data_store = load_data()
     all_entries = data_store.get("data", {}).get("data", [])
 
     query_lower = query.lower()
-    results = []
+    filtered_results = []
 
     for entry in all_entries:
         title_match = query_lower in entry.get("title", "").lower()
         description_match = query_lower in entry.get("description", "").lower()
-
         tag_match = any(query_lower in tag.lower() for tag in entry.get("tag", []))
         category_match = any(query_lower in cat.lower() for cat in entry.get("category", []))
 
         if title_match or description_match or tag_match or category_match:
-            results.append(entry)
+            filtered_results.append(entry)
+
+    # Pagination calculation
+    total = len(filtered_results)
+    start = (page - 1) * limit
+    end = start + limit
+    paginated_results = filtered_results[start:end]
 
     return {
         "status": "success",
         "query": query,
-        "count": len(results),
-        "data": results
+        "page": page,
+        "limit": limit,
+        "total_results": total,
+        "data": paginated_results
     }
 
 
