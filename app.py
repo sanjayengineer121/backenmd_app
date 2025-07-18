@@ -78,6 +78,59 @@ def save_data(data):
     with open(DATA_FILE, "w") as f:
         json.dump(data, f, indent=2)
 
+
+
+ENGAGEMENT_FILE = "engagement.json"
+
+# Initialize file if it doesn't exist
+if not os.path.exists(ENGAGEMENT_FILE):
+    with open(ENGAGEMENT_FILE, "w") as f:
+        json.dump({}, f)
+
+def load_engagement():
+    with open(ENGAGEMENT_FILE, "r") as f:
+        return json.load(f)
+
+def save_engagement(data):
+    with open(ENGAGEMENT_FILE, "w") as f:
+        json.dump(data, f, indent=2)
+
+
+
+def initialize_video(video_id):
+    data = load_engagement()
+    if video_id not in data:
+        data[video_id] = {"likes": 0, "views": 0, "shares": 0}
+        save_engagement(data)
+    return data
+
+@app.get("/api/get/video")
+def get_video(video_id: str = Query(..., alias="id")):
+    data = initialize_video(video_id)
+    data[video_id]["views"] += 1
+    save_engagement(data)
+    return {"status": "success", "video_id": video_id, "counts": data[video_id]}
+
+@app.post("/api/like")
+def add_like(video_id: str = Query(..., alias="id")):
+    data = initialize_video(video_id)
+    data[video_id]["likes"] += 1
+    save_engagement(data)
+    return {"status": "success", "video_id": video_id, "likes": data[video_id]["likes"]}
+
+@app.post("/api/share")
+def add_share(video_id: str = Query(..., alias="id")):
+    data = initialize_video(video_id)
+    data[video_id]["shares"] += 1
+    save_engagement(data)
+    return {"status": "success", "video_id": video_id, "shares": data[video_id]["shares"]}
+
+@app.get("/api/get/stats")
+def get_stats(video_id: str = Query(..., alias="id")):
+    data = initialize_video(video_id)
+    return {"status": "success", "video_id": video_id, "counts": data[video_id]}
+
+
 # Utils
 def load_json(file): return json.load(open(file))
 def save_json(file, data): json.dump(data, open(file, "w"), indent=2)
