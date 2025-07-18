@@ -238,23 +238,33 @@ async def add_sundari_entry(
 
 
 @app.get("/api/get/sundarikanya")
-def get_video_by_id(id: Optional[str] = Query(None)):
+def get_video_by_id(
+    id: Optional[str] = Query(None),
+    page: int = Query(1, ge=1)
+):
     data = load_data()["data"]["data"]
 
-    # If no id is passed, return all videos
-    if id is None:
-        return data
+    # ✅ Return specific video by ID
+    if id:
+        formatted_id = id.zfill(3)
+        result = next((item for item in data if item["id"] == formatted_id), None)
+        if not result:
+            raise HTTPException(status_code=404, detail=f"Video with ID {formatted_id} not found.")
+        return result
 
-    # Format ID to 3 digits (e.g., "2" → "002")
-    formatted_id = id.zfill(3)
+    # ✅ Pagination logic (60 per page)
+    per_page = 60
+    start = (page - 1) * per_page
+    end = start + per_page
+    paginated_data = data[start:end]
 
-    # Find the video with matching ID
-    result = next((item for item in data if item["id"] == formatted_id), None)
-
-    if not result:
-        raise HTTPException(status_code=404, detail=f"Video with ID {formatted_id} not found.")
-
-    return result
+    return {
+        "status": "success",
+        "total": len(data),
+        "page": page,
+        "per_page": per_page,
+        "data": paginated_data
+    }
 
 # Utility: Convert ["Pakistani,Teen,,Model"] → ["Pakistani", "Teen", "Model"]
 def clean_split_list(value):
