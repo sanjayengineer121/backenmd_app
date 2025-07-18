@@ -10,6 +10,7 @@ import uuid
 from fastapi.middleware.cors import CORSMiddleware
 import bcrypt
 from typing import Union
+from upload import *
 
 
 app = FastAPI()
