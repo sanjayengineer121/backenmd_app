@@ -1,6 +1,5 @@
 from fastapi import FastAPI, Request, Form, status, HTTPException,File, UploadFile,Query, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse,FileResponse
-from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 import json
 from pydantic import BaseModel, EmailStr
@@ -10,7 +9,7 @@ import uuid
 from fastapi.middleware.cors import CORSMiddleware
 import bcrypt
 from typing import Union
-
+from upload import *
 
 app = FastAPI()
 
@@ -178,39 +177,63 @@ def session_info(session_id: str):
     return {"status": "error", "detail": "Session invalid or expired"}
 
 
+
+import os
+
 @app.post("/api/add/sundarikanya", status_code=201)
-def add_sundari_entry(data: UploadData):
-    # ✅ Validate session
-    if not is_session_valid(data.session_id):
+async def add_sundari_entry(
+    session_id: str = Form(...),
+    uploader: str = Form(...),
+    title: str = Form(...),
+    description: str = Form(...),
+    tag: str = Form(...),
+    category: str = Form(...),
+    thumbnail: UploadFile = File(...),
+    video: UploadFile = File(...)
+):
+    if not is_session_valid(session_id):
         raise HTTPException(status_code=401, detail="Invalid or expired session")
 
+    # Ensure folder exists
+    os.makedirs("temp", exist_ok=True)
+
+    # Save thumbnail
+    thumb_path = f"temp/thumb_{datetime.now().timestamp()}.jpg"
+    with open(thumb_path, "wb") as f:
+        f.write(await thumbnail.read())
+
+    # Save video
+    video_path = f"temp/video_{datetime.now().timestamp()}.mp4"
+    with open(video_path, "wb") as f:
+        f.write(await video.read())
+
+    # Upload and get raw links as before...
+    thumbnail_link = upload_image(thumb_path)
+    raw_thumbnail = thumbnail_link
+
+    share_link = upload_to_root(video_path)
+    raw_video = share_link
+
+    # Continue saving entry logic...
     store = load_data()
     existing = store.get("data", {}).get("data", [])
+    new_id = f"{len(existing) + 1:03d}"
 
-    added_count = 0
-
-    for video in data.videos:
-        # ✅ Create one entry with multiple video URLs
-        new_id = f"{len(existing) + 1:03d}"
-        new_entry = {
-            "id": new_id,
-            "uploader": data.uploader,
-            "title": video.title,
-            "description": video.description,
-            "thumbnail": video.thumbnail,
-            "videourl": video.videourl,  # ✅ entire list
-            "tag": video.tag,
-            "category": video.category
-        }
-        existing.append(new_entry)
-        added_count += 1
-
+    entry = {
+        "id": new_id,
+        "uploader": uploader,
+        "title": title,
+        "description": description,
+        "thumbnail": raw_thumbnail,
+        "videourl": [raw_video],
+        "tag": tag.split(","),
+        "category": category.split(","),
+    }
+    existing.append(entry)
     store["data"]["data"] = existing
     save_data(store)
 
-    return {"status": "success", "added": added_count}
-
-
+    return {"status": "success", "added": 1}
 
 
 
