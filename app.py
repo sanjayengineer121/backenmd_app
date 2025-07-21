@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import bcrypt
 from typing import Union
 from upload import *
+import os
 
 app = FastAPI()
 
@@ -23,6 +24,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+
+
+class UpdateVideo(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    thumbnail: Optional[str] = None
+    videourl: Optional[List[str]] = None
+    tag: Optional[List[str]] = None
+    category: Optional[List[str]] = None
+
 
 DATA_FILE = "data.json"
 
@@ -149,6 +162,13 @@ def show_login(request: Request):
 def serve_home(request: Request):
     return templates.TemplateResponse("home.html", {"request": request})
 
+
+@app.get("/update")
+async def update_page(request: Request):
+    return templates.TemplateResponse("test.html", {"request": request})
+
+
+
 # -------------------
 # POST API to add profile
 # -------------------
@@ -178,7 +198,6 @@ def session_info(session_id: str):
 
 
 
-import os
 
 @app.post("/api/add/sundarikanya", status_code=201)
 async def add_sundari_entry(
@@ -217,7 +236,9 @@ async def add_sundari_entry(
     # Continue saving entry logic...
     store = load_data()
     existing = store.get("data", {}).get("data", [])
-    new_id = f"{len(existing) + 1:03d}"
+    existing_ids = [int(item["id"]) for item in existing if "id" in item and item["id"].isdigit()]
+    new_id_number = max(existing_ids, default=0) + 1
+    new_id = f"{new_id_number:03d}"
 
     entry = {
         "id": new_id,
@@ -358,6 +379,25 @@ def search_sundari_entries(
     }
 
 
+
+@app.delete("/api/get/delete")
+async def delete_video(id: str = Query(...), session_id: str = Query(...)):
+    if not is_session_valid(session_id):
+        raise HTTPException(status_code=401, detail="Invalid session")
+
+    data = load_data()
+    videos = data.get("data", {}).get("data", [])
+    index_to_delete = next((i for i, v in enumerate(videos) if v["id"] == id), None)
+
+    if index_to_delete is None:
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    videos.pop(index_to_delete)
+    data["data"]["data"] = videos
+    save_data(data)
+
+    return {"status": "success", "message": f"Video with id {id} deleted"}
+
 @app.get("/api/get/bestcategory")
 def get_best_category():
     data_store = load_data()
@@ -383,6 +423,52 @@ def get_best_category():
         "best_categories": best_categories
     }
 
+
+@app.post("/api/get/update", status_code=200)
+async def update_video(
+    id: str = Form(...),
+    session_id: str = Form(...),
+    uploader: str = Form(...),
+    title: str = Form(...),
+    description: str = Form(...),
+    tag: str = Form(...),
+    category: str = Form(...),
+    thumbnail: Optional[UploadFile] = File(None),
+    video: Optional[UploadFile] = File(None)
+):
+    if not is_session_valid(session_id):
+        raise HTTPException(status_code=401, detail="Invalid session")
+
+    data = load_data()
+    videos = data.get("data", {}).get("data", [])
+    video_obj = next((v for v in videos if v["id"] == id), None)
+
+    if not video_obj:
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    video_obj["uploader"] = uploader
+    video_obj["title"] = title
+    video_obj["description"] = description
+    video_obj["tag"] = [t.strip() for t in tag.split(",") if t.strip()]
+    video_obj["category"] = [c.strip() for c in category.split(",") if c.strip()]
+
+    # Optional update of thumbnail
+    if thumbnail:
+        temp_thumb = f"temp/thumb_{datetime.now().timestamp()}.jpg"
+        with open(temp_thumb, "wb") as f:
+            f.write(await thumbnail.read())
+        video_obj["thumbnail"] = upload_image(temp_thumb)
+
+    # Optional update of video file
+    if video:
+        temp_vid = f"temp/video_{datetime.now().timestamp()}.mp4"
+        with open(temp_vid, "wb") as f:
+            f.write(await video.read())
+        video_obj["videourl"] = [upload_to_root(temp_vid)]
+
+    save_data(data)
+
+    return {"status": "success", "message": "Video updated"}
 
 
 @app.post("/api/create-account")
