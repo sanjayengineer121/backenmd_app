@@ -264,7 +264,8 @@ def get_video_by_id(
     page: int = Query(1, ge=1)
 ):
     data = load_data()["data"]["data"]
-
+    total = len(data)
+    
     # ✅ Return specific video by ID
     if id:
         formatted_id = id.zfill(3)
@@ -273,19 +274,20 @@ def get_video_by_id(
             raise HTTPException(status_code=404, detail=f"Video with ID {formatted_id} not found.")
         return result
 
-    # ✅ Pagination logic (60 per page)
+    # ✅ Pagination logic from end
     per_page = 60
-    start = (page - 1) * per_page
-    end = start + per_page
+    start = max(total - (page * per_page), 0)
+    end = total - ((page - 1) * per_page)
     paginated_data = data[start:end]
 
     return {
         "status": "success",
-        "total": len(data),
+        "total": total,
         "page": page,
         "per_page": per_page,
-        "data": paginated_data
+        "data": list(reversed(paginated_data))  # So newest is always first
     }
+
 
 # Utility: Convert ["Pakistani,Teen,,Model"] → ["Pakistani", "Teen", "Model"]
 def clean_split_list(value):
