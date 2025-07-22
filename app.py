@@ -275,7 +275,7 @@ def get_video_by_id(
         return result
 
     # ✅ Pagination logic from end
-    per_page = 60
+    per_page = 40
     start = max(total - (page * per_page), 0)
     end = total - ((page - 1) * per_page)
     paginated_data = data[start:end]
