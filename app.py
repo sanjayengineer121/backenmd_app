@@ -11,6 +11,8 @@ import bcrypt
 from typing import Union
 from upload import *
 import os
+from datetime import datetime, timedelta
+import uuid
 
 app = FastAPI()
 
@@ -208,55 +210,53 @@ async def add_sundari_entry(
     tag: str = Form(...),
     category: str = Form(...),
     thumbnail: UploadFile = File(...),
-    video: UploadFile = File(...)
+    video: List[UploadFile] = File(...)  # Accept multiple files here
 ):
     if not is_session_valid(session_id):
         raise HTTPException(status_code=401, detail="Invalid or expired session")
 
-    # Ensure folder exists
     os.makedirs("temp", exist_ok=True)
 
     # Save thumbnail
     thumb_path = f"temp/thumb_{datetime.now().timestamp()}.jpg"
     with open(thumb_path, "wb") as f:
         f.write(await thumbnail.read())
+    raw_thumbnail = upload_image(thumb_path)
 
-    # Save video
-    video_path = f"temp/video_{datetime.now().timestamp()}.mp4"
-    with open(video_path, "wb") as f:
-        f.write(await video.read())
+    # Save and upload each video
+    video_links = []
+    for vid_file in video:
+        vid_path = f"temp/video_{datetime.now().timestamp()}_{vid_file.filename}"
+        with open(vid_path, "wb") as f:
+            f.write(await vid_file.read())
+        uploaded_link = upload_to_root(vid_path)
+        video_links.append(uploaded_link)
 
-    # Upload and get raw links as before...
-    thumbnail_link = upload_image(thumb_path)
-    raw_thumbnail = thumbnail_link
-
-    share_link = upload_to_root(video_path)
-    raw_video = share_link
-
-    # Continue saving entry logic...
+    # Generate new ID
     store = load_data()
     existing = store.get("data", {}).get("data", [])
     existing_ids = [int(item["id"]) for item in existing if "id" in item and item["id"].isdigit()]
     new_id_number = max(existing_ids, default=0) + 1
     new_id = f"{new_id_number:03d}"
 
+    # Create entry
     entry = {
         "id": new_id,
         "uploader": uploader,
         "title": title,
         "description": description,
         "thumbnail": raw_thumbnail,
-        "videourl": [raw_video],
-        "tag": tag.split(","),
-        "category": category.split(","),
+        "videourl": video_links,  # Save multiple video URLs
+        "tag": [t.strip() for t in tag.split(",") if t.strip()],
+        "category": [c.strip() for c in category.split(",") if c.strip()]
     }
+
     existing.append(entry)
     store["data"]["data"] = existing
     save_data(store)
 
     return {"status": "success", "added": 1}
-
-
+    
 
 @app.get("/api/get/sundarikanya")
 def get_video_by_id(
@@ -484,8 +484,7 @@ def create_account(user: UserCreate):
     return {"status": "success", "username": user.username}
 
 
-from datetime import datetime, timedelta
-import uuid
+
 
 SESSION_FILE = "sessions.json"
 
@@ -509,7 +508,7 @@ def login(user: UserCreate):
             if bcrypt.checkpw(user.password.encode("utf-8"), account["password"].encode("utf-8")):
                 # Generate session
                 session_id = str(uuid.uuid4())
-                expiry_time = (datetime.utcnow() + timedelta(hours=2)).isoformat()
+                expiry_time = (datetime.utcnow() + timedelta(days=7)).isoformat()
 
                 # Store session
                 sessions = load_sessions()

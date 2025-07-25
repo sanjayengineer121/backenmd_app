@@ -89,9 +89,20 @@
     </div>
 
     <div class="mb-3">
-      <label class="form-label">Video File</label>
-      <input type="file" id="video" name="video" class="form-control" accept="video/*" required>
-    </div>
+        <label class="form-label">Video Files <span class="text-danger">*</span></label>
+       <div id="videoInputsWrapper">
+  <div class="input-group mb-2">
+    <input type="file" name="video" class="form-control video-input" accept="video/*" multiple required>
+  </div>
+        </div>
+        <button type="button" class="btn btn-success" id="addMoreVideos">+</button>
+
+        
+        <div class="form-text">Click '+' to add more video inputs</div>
+      </div>
+
+
+
 
     <div class="mb-3">
       <label class="form-label">Tags (comma separated)</label>
@@ -107,6 +118,23 @@
   </form>
 </div>
 
+<script>
+document.getElementById("addMoreVideos").addEventListener("click", function () {
+    const wrapper = document.getElementById("videoInputsWrapper");
+    const inputGroup = document.createElement("div");
+    inputGroup.className = "input-group mb-2";
+
+    const input = document.createElement("input");
+    input.type = "file";
+    input.name = "video";
+    input.className = "form-control video-input";
+    input.accept = "video/*";
+    input.multiple = true;
+
+    inputGroup.appendChild(input);
+    wrapper.appendChild(inputGroup);
+});
+</script>
 
 
   <script>
@@ -172,18 +200,16 @@
 document.getElementById("uploadForm").addEventListener("submit", async function (e) {
     e.preventDefault();
 
-    const uploader = document.getElementById("uploader").value;
+    const uploader = document.getElementById("uploader").value.trim();
     const session_id = localStorage.getItem("session_id");
     const title = document.getElementById("title").value.trim();
     const description = document.getElementById("description").value.trim();
     const tag = document.getElementById("tag").value.trim();
     const category = document.getElementById("category").value.trim();
-
     const thumbnailFile = document.getElementById("thumbnail").files[0];
-    const videoFile = document.getElementById("video").files[0];
 
-    if (!title || !description || !thumbnailFile || !videoFile) {
-        Swal.fire("Missing Fields", "Please fill all fields and select files.", "error");
+    if (!uploader || !title || !description || !tag || !category || !thumbnailFile) {
+        Swal.fire("Missing Fields", "Please fill all required fields.", "error");
         return;
     }
 
@@ -195,10 +221,30 @@ document.getElementById("uploadForm").addEventListener("submit", async function 
     formData.append("tag", tag);
     formData.append("category", category);
     formData.append("thumbnail", thumbnailFile);
-    formData.append("video", videoFile);
 
+    // Handle multiple video file inputs
+    const videoInputs = document.querySelectorAll(".video-input");
+    let atLeastOneVideo = false;
+
+    videoInputs.forEach(input => {
+        const files = input.files;
+        if (files.length > 0) {
+            atLeastOneVideo = true;
+            for (let i = 0; i < files.length; i++) {
+                formData.append("video", files[i]); // append each file
+            }
+        }
+    });
+
+    if (!atLeastOneVideo) {
+        Swal.fire("Missing Video", "Please select at least one video file.", "error");
+        return;
+    }
+
+    // Show loader
     Swal.fire({
         title: 'Uploading...',
+        text: 'Please wait while your video is being uploaded.',
         allowOutsideClick: false,
         didOpen: () => Swal.showLoading()
     });
@@ -210,13 +256,18 @@ document.getElementById("uploadForm").addEventListener("submit", async function 
         });
 
         const result = await response.json();
-
         Swal.close();
 
         if (response.ok && result.status === "success") {
-            Swal.fire("Uploaded!", "Video uploaded successfully.", "success");
+            Swal.fire("Success", "Videos uploaded successfully.", "success");
             document.getElementById("uploadForm").reset();
             document.getElementById("uploader").value = uploader;
+            // Clear all video inputs except first
+            const wrapper = document.getElementById("videoInputsWrapper");
+            wrapper.innerHTML = `
+                <div class="input-group mb-2">
+                    <input type="file" name="video" class="form-control video-input" accept="video/*" multiple required>
+                </div>`;
         } else {
             Swal.fire("Error", result.detail || "Upload failed.", "error");
         }
@@ -226,6 +277,7 @@ document.getElementById("uploadForm").addEventListener("submit", async function 
     }
 });
 </script>
+
 
 
 </body>
