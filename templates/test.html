@@ -221,18 +221,21 @@
 
               <!-- VIDEO SECTION -->
               <div class="col-lg-6 mt-4">
-                <label class="form-label fw-semibold">Current Video</label>
-                <div class="border rounded-3 p-2 bg-white">
-                  <input type="text" id="video_url" class="form-control mb-2" readonly>
-                  <video id="videoPreview" class="w-100 rounded shadow-sm border" controls style="max-height: 300px;"></video>
+              <label class="form-label fw-semibold">Current Videos</label>
+              <div class="border rounded-3 p-2 bg-white">
+                <div id="videoPreviewWrapper" class="mb-2"></div>
+              </div>
+            </div>
+
+
+              <!-- NEW VIDEO UPLOAD -->
+              <div id="videoInputsWrapper">
+                <div class="input-group mb-2">
+                  <input type="file" name="video" class="form-control video-input" accept="video/*" multiple>
+                  <button type="button" class="btn btn-outline-secondary" id="addVideoInputBtn">+</button>
                 </div>
               </div>
 
-              <!-- NEW VIDEO UPLOAD -->
-              <div class="col-lg-6 mt-4">
-                <label class="form-label fw-semibold">New Video (Optional)</label>
-                <input type="file" id="video" class="form-control" accept="video/*">
-              </div>
 
 
           <div class="mt-4 text-end">
@@ -475,6 +478,36 @@ async function deleteVideo(id) {
 
 </script>
 
+
+
+<script>
+// Add new video input field
+document.getElementById("addVideoInputBtn").addEventListener("click", function () {
+  const wrapper = document.getElementById("videoInputsWrapper");
+
+  const group = document.createElement("div");
+  group.className = "input-group mb-2";
+
+  const input = document.createElement("input");
+  input.type = "file";
+  input.name = "video";
+  input.accept = "video/*";
+  input.className = "form-control video-input";
+  input.multiple = true;
+
+  const removeBtn = document.createElement("button");
+  removeBtn.type = "button";
+  removeBtn.className = "btn btn-outline-danger";
+  removeBtn.textContent = "−";
+  removeBtn.onclick = () => group.remove();
+
+  group.appendChild(input);
+  group.appendChild(removeBtn);
+  wrapper.appendChild(group);
+});
+</script>
+
+
 <script>
 document.addEventListener("DOMContentLoaded", () => {
   document.body.addEventListener("click", async e => {
@@ -511,10 +544,19 @@ document.addEventListener("DOMContentLoaded", () => {
           document.getElementById("thumbnailPreview").classList.toggle("d-none", !thumbnailUrl);
 
           // Video
-          const firstVideoUrl = Array.isArray(data.videourl) ? data.videourl[0] : "";
-          document.getElementById("video_url").value = firstVideoUrl;
-          document.getElementById("videoPreview").src = firstVideoUrl;
-          document.getElementById("videoPreview").classList.toggle("d-none", !firstVideoUrl);
+          const videoWrapper = document.getElementById("videoPreviewWrapper");
+          videoWrapper.innerHTML = ""; // Clear old previews
+
+          if (Array.isArray(data.videourl)) {
+            data.videourl.forEach((url, index) => {
+              const video = document.createElement("video");
+              video.controls = true;
+              video.src = url;
+              video.className = "mb-2 w-100 rounded shadow-sm";
+              videoWrapper.appendChild(video);
+            });
+          }
+
 
 
         document.getElementById("updateForm").style.display = "block";
@@ -553,8 +595,15 @@ document.getElementById("updateForm").addEventListener("submit", async (e) => {
   const thumbnail = document.getElementById("thumbnail").files[0];
   if (thumbnail) formData.append("thumbnail", thumbnail);
 
-  const video = document.getElementById("video").files[0];
-  if (video) formData.append("video", video);
+  const videoInputs = document.querySelectorAll(".video-input");
+    for (const input of videoInputs) {
+      if (input.files.length > 0) {
+        for (const file of input.files) {
+          formData.append("video", file);
+        }
+      }
+    }
+
 
   // Show loading state during update
   Swal.fire({ title: "Updating...", didOpen: () => Swal.showLoading() });
